@@ -1,4 +1,7 @@
-﻿<#
+<#
+
+.NAME
+AcronisAPILibrairy
 
 .SYNOPSIS
 PowerShell Librairy to access Acronis Cloud Backup API Service v1
@@ -29,38 +32,44 @@ https://github.com/holytoutant/AcronisAPIPowerShellLibrairy
 #>
 
 #Initialize system variables
+#Clean-up all previously initialized variables
 $AcronisURL = 'https://us-cloud.acronis.com/'
 $APIVersion = '1'
 [Microsoft.PowerShell.Commands.WebRequestSession]$nwebSession
+$LastHttpRequestReply
 [PSCredential] $AcronisCredentials
+Clear-Variable -Name AcronisCredentials
+Clear-Variable -Name nwebSession
+Clear-Variable -Name LastHttpRequestReply
+$firstRun = $true
 
-Function GetUserChoice
+Function Get-UserChoice
 {
     param( [string]$initialMessage )
 
     clear
 
-    if($initialMessage -eq ""){
-        write-host "
-        Welcome to this powershell tool to access Acronis Cloud Backup API
-        Current datacenter: $AcronisURL
-        Current API Version: $APIVersion
-        ---------------------------------------
-        "
-    } else {
-        Write-host $initialMessage
-    }
+#Change and the reset color after displaying     
+$t = $host.ui.RawUI.ForegroundColor
+$host.ui.RawUI.ForegroundColor = "DarkGreen"
+if($initialMessage -ne "" ){write-output $initialMessage}
+$host.ui.RawUI.ForegroundColor = $t
 
-    if($Global:AcronisCredentials.Username){
-        "Your current username is " + $Global:AcronisCredentials.UserName
-    }
+if($Global:FirstRun){write-output "Welcome to this powershell tool to access Acronis Cloud Backup API"; $Global:FirstRun = $false}
+write-output "Current datacenter: $Global:AcronisURL
+Current API Version: $Global:APIVersion"
+if($Global:AcronisCredentials.Username){write-output "Current username is "$Global:AcronisCredentials.UserName}
+"---------------------------------------"
+
+    
 
     #Start the script that provides a Graphical User Interface
-    Write-Host "Options available
+    write-output "Options available
     1 - Enter credentials
     2 - Login to Acronis Cloud
     3 - Get current user information
     C - Change Acronis Datacenter
+    N - Display Web Session information
     Exit - Exit the current program"
     #Wait for user input
     $UserInput = Read-Host -Prompt 'Please choose an option...'
@@ -80,55 +89,68 @@ Function PerformUserChoice
         #User choosed "Enter Credentials"
         "1" {
                 "Please enter your Acronis Credentials"
+                Get-AcronisCredentials
                 
-                $ReturnString = "The credentials for " + $Global:AcronisCredentials.UserName + " was successfully saved"
-                GetUserChoice -initialMessage $ReturnString
+                if($Global:AcronisCredentials){
+                    $ReturnString = "The credentials for " + $Global:AcronisCredentials.UserName + " was successfully saved"
+                } else {
+                    $ReturnString = "There was an error saving your credentials, please try again."
+                }
+
+                Get-UserChoice -initialMessage $ReturnString
                 break
         }
 
         #Login to Acronis Cloud using the credentials
         "2" {
-                if(GotCredentials){
-                    Write-host "Logging in to $AcronisURL using " + $Global:AcronisCredentials.UserName
+                if(Got-AcronitCredentials){
+                    write-output "Logging in to $AcronisURL using "$Global:AcronisCredentials.UserName
                     Login -AcronisUsername $Global:AcronisCredentials.UserName -AcronisPassword $Global:AcronisCredentials.GetNetworkCredential().Password
-                    GetUserChoice -initialMessage "Successfully Logged in to Acronis"
+                    Get-UserChoice -initialMessage "Successfully Logged in to Acronis"
                 } else {
-                    GetUserChoice -initialMessage "Please enter your credentials first"
+                    Get-UserChoice -initialMessage "Please enter your credentials first"
                 }
         }
 
 
         #User choosed "Get current user information"
         "3" {
-                if(GotCredentials){
+                if(Got-AcronitCredentials){
                     "Getting user information..."
-                    
+                    $ReturnString = Get-Profile
+                    Get-UserChoice -initialMessage $ReturnString
                 } else {
-                    GetUserChoice -initialMessage "Please enter your credentials first"
+                    Get-UserChoice -initialMessage "Please enter your credentials first"
                 }
+        }
+
+        #Get nWebSession Information
+        "n" {
+                $ReturnString = Get-WebSessionInformation
+                Get-UserChoice -initialMessage $ReturnString
         }
 
         #User choosed "Change Datacenter"
         "c" {
                 clear
-
-                
+                Change-Datacenter
+                Get-UserChoice -initialMessage "Your new datacenter is"$Global:AcronisURL
         }
         
         "exit"{
-                if(GotCredentials){Logout}
+                if(Got-AcronitCredentials){Logout}
                 exit
         }
 
         #User choice was not part of this list
         default {
                 $ReturnString = "Your choice was invalid. Your choice was: $UserChoice"
-                GetUserChoice -initialMessage $ReturnString
+                Get-UserChoice -initialMessage $ReturnString
         }
     }
 }
 
-Function GotCredentials
+Function Got-AcronitCredentials
 {
     if($Global:AcronisCredentials){
         return $true
@@ -137,12 +159,20 @@ Function GotCredentials
     }
 }
 
+Function Get-AcronisCredentials
+{
+
+    $Global:AcronisCredentials = Get-Credential
+
+}
+
 Function Change-Datacenter{
 
     "Resetting Web Session..."
-    $Global:nwebSession = $null
+    Clear-Variable -Name nwebSession
+    Clear-Variable -Name LastHttpRequestReply
     "Resetting the current credentials..."
-    $Global:AcronisCredentials = $null
+    Clear-Variable -Name AcronisCredentials
     "Getting new credentials"
     $Global:AcronisCredentials = Get-Credential
     "Please select your datacenter:
@@ -196,7 +226,7 @@ Function Login
        password=$AcronisPassword
     }
     $json = $postParams | ConvertTo-Json
-    $Request = Invoke-RestMethod $CompleteAcronisURL -Method Post -Body $json -ContentType 'application/json' -SessionVariable webSession
+    $Global:LastHttpRequestReply = Invoke-RestMethod $CompleteAcronisURL -Method Post -Body $json -ContentType 'application/json' -SessionVariable webSession
     $global:nwebSession = $webSession
 }
 
@@ -212,10 +242,21 @@ Function Get-Profile
 {
 
     $CompleteAcronisURL = $AcronisURL + "api/" + $APIVersion + "/profile"
-    $response = Invoke-RestMethod $CompleteAcronisURL -Method Get -ContentType 'application/json' -WebSession $global:nwebSession
+    $Global:LastHttpRequestReply = Invoke-RestMethod $CompleteAcronisURL -Method Get -ContentType 'application/json' -WebSession $global:nwebSession
+    Return $Global:LastHttpResponseReply
+}
 
-    $response
+Function Get-WebSessionInformation
+{
+    #Return a string containing the web session information
+    if($Global:nWebSession){
+        $ReturnString = $Global:LastHttpRequestReply
+        return $ReturnString
+    } else {
+        return "The web session has not been initialized yet. Please login first"
+    }
+   
 }
 
 #Start initialization
-GetUserChoice
+Get-UserChoice
